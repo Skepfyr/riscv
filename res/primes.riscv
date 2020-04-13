@@ -1,16 +1,18 @@
-addi x1, x0, 1
+li x1, 2
+li s0, 1000
+li s1, 32
 LOOP:
-addi x1, x1, 1
-lb x3, x1, 52
-blt x0, x3, LOOP
-mv x2, x1
+slli x2, x1, 1
 INNER:
+sb x2, s1, 100
 add x2, x2, x1
-addi x3, x0, 1
-sb x2, x3, 52
-addi x3, x0, 1000
-blt x2, x3, INNER
-addi x3, x0, 32
-blt x1, x3, LOOP
+blt x2, s0, INNER
+OUT:
+addi x1, x1, 1
+lb x2, x1, 100
+blt zero, x2, OUT
+mv a3, x1
+ecall
+blt x1, s1, LOOP
+blt x1, s0, OUT
 ebreak
-DATA:

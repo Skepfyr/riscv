@@ -1,3 +1,10 @@
+//! A RISC-V assembler
+//! 
+//! The main entrypoint to this module is the [assemble] function that takes a
+//! the input RISC-V assembler code and produces the program as machine code.
+//! 
+//! [assemble]: ./fn.assemble.html
+
 use crate::bits;
 use std::{
     collections::HashMap,
@@ -5,9 +12,10 @@ use std::{
     ops::Range,
 };
 
+/// Assembles the input into machine code.
 pub fn assemble(input: &str) -> Result<Vec<u32>, String> {
     let (
-        i,
+        _,
         Program {
             instructions,
             labels,
@@ -28,6 +36,7 @@ struct Program<'a> {
     labels: HashMap<&'a str, usize>,
 }
 
+#[allow(dead_code)] // Float ops not implemented yet
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Instruction<'a> {
     RType {
@@ -391,7 +400,21 @@ fn instruction(i: &str) -> ParseResult<Instruction> {
                 instruction: 0b000000000000_00000_000_00000_0010011,
             },
         ),
-        // TODO: li
+        "li" => {
+            let (i, rd) = register(i)?;
+            let i = i.trim_start_matches(arg_sep);
+            let (i, imm) = immediate(i)?;
+            (
+                i,
+                Instruction::IType {
+                    opcode: 0b0010011,
+                    funct3: 0b000,
+                    destination: rd,
+                    source1: Register(0b00000),
+                    immediate: imm,
+                },
+            )
+        }
         "mv" => translate_op(i, |rd, rs| Instruction::IType {
             opcode: 0b0010011,
             funct3: 0b000,
@@ -488,6 +511,8 @@ fn r_type<'a>(i: &str, opcode: u32, funct3: u32, funct7: u32) -> ParseResult<Ins
     ))
 }
 
+// Float ops not implemented yet
+#[allow(dead_code)]
 fn r4_type<'a>(i: &str, opcode: u32, funct3: u32, funct2: u32) -> ParseResult<Instruction> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);

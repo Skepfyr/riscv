@@ -50,6 +50,10 @@ impl Computer {
                 Ok(()) => continue,
                 Err(Exception::EnvironmentCall) => {
                     self.core.program_counter += 4;
+                    match self.core.registers[10] {
+                        0 => println!("{}", self.core.registers[13]),
+                        _ => {}
+                    }
                     continue;
                 }
                 Err(e) => return e,
