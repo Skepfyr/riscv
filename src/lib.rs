@@ -2,15 +2,16 @@
 #![feature(exclusive_range_pattern, array_value_iter, or_patterns)]
 //! A RISC-V Computer emulator
 
+pub mod assembler;
 pub mod traps;
 
 use core::{convert::TryInto, ops::Range};
 use traps::Exception;
 
 /// A RISC-V computer
-/// 
+///
 /// Contains a single [Core] and the main [Memory].
-/// 
+///
 /// [Core]: ./struct.Core.html
 /// [Memory]: ./struct.Memory.html
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -23,7 +24,7 @@ pub struct Computer {
 
 impl Computer {
     /// Creates a new computer with the specified amount of memory.
-    /// 
+    ///
     /// All the memory is initialised to zero.
     /// This panics if too much memory is requested.
     pub fn new(memory_size: u64) -> Self {
@@ -35,12 +36,12 @@ impl Computer {
     }
 
     /// Runs the currently loaded program until an [Exception] is hit.
-    /// 
+    ///
     /// This resumes from whatever state the processor is in, so this can be
     /// called repeatedly after appropriately dealing with the exception.
-    /// 
+    ///
     /// This currently ignores any raised [EnvironmentCall].
-    /// 
+    ///
     /// [Exception]: ./traps/enum.Exception.html
     /// [EnvironmentCall]: ./traps/enum.Exception.html#variant.EnvironmentCall
     pub fn run(&mut self) -> Exception {
@@ -49,19 +50,19 @@ impl Computer {
                 Ok(()) => continue,
                 Err(Exception::EnvironmentCall) => {
                     self.core.program_counter += 4;
-                    continue
-                },
+                    continue;
+                }
                 Err(e) => return e,
             }
         }
     }
 
     /// Load a program into memory and point the program counter at the start.
-    /// 
+    ///
     /// This copies the provided instructions into the bottom of system memory
     /// and resets the program counter of the core so that it will be executed
     /// when `run` is next called.
-    pub fn load_program(&mut self, program: impl IntoIterator<Item=u32>) {
+    pub fn load_program(&mut self, program: impl IntoIterator<Item = u32>) {
         let bytes: Vec<_> = program
             .into_iter()
             .map(|i| core::array::IntoIter::new(i.to_le_bytes()))
@@ -73,7 +74,7 @@ impl Computer {
 }
 
 /// A systems's memory.
-/// 
+///
 /// Currently this only holds main memory but it is intended to also hold
 /// (references to) the memory of any attached DMA peripherals.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -149,10 +150,10 @@ const fn sext(num: u32, bit: u8) -> u32 {
 }
 
 /// A processing core, represents a single [RISC-V] hart.
-/// 
+///
 /// This implements a slight superset of RV64I, using a single instruction per
 /// clock cycle model.
-/// 
+///
 /// [RISC-V]: https://riscv.org/specifications/
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Core {
@@ -178,10 +179,10 @@ impl Core {
     }
 
     /// Execute a single clock cycle.
-    /// 
+    ///
     /// This returns an error if any [Exception]s occur, although these do not
     /// always indicate an actual error has occurred.
-    /// 
+    ///
     /// [Exception]: ./traps/enum.Exception.html
     pub fn step(&mut self, mem: &mut Memory) -> Result<(), Exception> {
         // It makes no difference doing this at the start or end as long as it
@@ -238,7 +239,7 @@ impl Core {
             (0b01, 0b000 | 0b001) => (sext(bits(inst, 25..32) << 5 | bits(inst, 7..12), 12), 2),
             // R4 type instruction - Used for floating point instructions
             (0b10, lower) if lower < 4 => (0, 3),
-            // R type instruction - Register-Register operations 
+            // R type instruction - Register-Register operations
             (0b01 | 0b10, _) => (0, 2),
             // B type instruction - Used for branch instructions
             (0b11, 0b000) => (

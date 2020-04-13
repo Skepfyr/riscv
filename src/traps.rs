@@ -1,15 +1,15 @@
 //! Traps - Exceptions and Interrupts
-//! 
+//!
 //! This module holds the types for all exceptions and interrupts that can be
 //! raised by a running [Core].
-//! 
+//!
 //! [Core]: ../struct.Core.html
 
 /// An enumeration of all the exceptions that could occur
-/// 
+///
 /// This is a mixture be Contained, Requested, Invisible and Fatal traps, these
 /// may need to be separated out in the future.
-/// 
+///
 /// Not all of these are currently used, but it is intended that they will be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Exception {
