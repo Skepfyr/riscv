@@ -1,4 +1,5 @@
 #![warn(missing_docs)]
+#![allow(clippy::inconsistent_digit_grouping, clippy::unreadable_literal)]
 #![feature(exclusive_range_pattern, array_value_iter, or_patterns)]
 //! A RISC-V Computer emulator
 
@@ -114,7 +115,7 @@ impl Memory {
         } else {
             [0; 8]
         };
-        &bytes[..num_bytes].copy_from_slice(data);
+        (&mut bytes[..num_bytes]).copy_from_slice(data);
         Ok(u64::from_le_bytes(bytes))
     }
 
@@ -159,7 +160,7 @@ const fn sext(num: u32, bit: u8) -> u32 {
 /// clock cycle model.
 ///
 /// [RISC-V]: https://riscv.org/specifications/
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Core {
     /// The integer registers, the 0th register shoul always be 0.
     pub registers: [u64; 32],
@@ -174,12 +175,7 @@ pub struct Core {
 impl Core {
     /// Create a new core with all registers set to 0.
     pub fn new() -> Self {
-        Self {
-            registers: [0; 32],
-            float_registers: [0; 32],
-            program_counter: 0,
-            cycle_count: 0,
-        }
+        Self::default()
     }
 
     /// Execute a single clock cycle.
@@ -217,7 +213,7 @@ impl Core {
     fn fetch(program_counter: u64, mem: &Memory) -> Result<FetchStage, Exception> {
         // Just load the next instruction from memory
         Ok(FetchStage {
-            program_counter: program_counter,
+            program_counter,
             instruction: mem.load(program_counter, 2, false)? as u32,
         })
     }

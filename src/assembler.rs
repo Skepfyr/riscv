@@ -1,8 +1,8 @@
 //! A RISC-V assembler
-//! 
+//!
 //! The main entrypoint to this module is the [assemble] function that takes a
 //! the input RISC-V assembler code and produces the program as machine code.
-//! 
+//!
 //! [assemble]: ./fn.assemble.html
 
 use crate::bits;
@@ -329,7 +329,7 @@ fn label(i: &str) -> ParseResult<&str> {
 fn in_range(digits: &[u8], range: Range<u32>) -> Result<u32, String> {
     match std::str::from_utf8(digits).unwrap().parse() {
         Ok(i) if range.contains(&i) => Ok(i),
-        _ => Err(format!("Invalid register name")),
+        _ => Err("Invalid register name".to_string()),
     }
 }
 
@@ -492,7 +492,7 @@ fn instruction(i: &str) -> ParseResult<Instruction> {
     })
 }
 
-fn r_type<'a>(i: &str, opcode: u32, funct3: u32, funct7: u32) -> ParseResult<Instruction> {
+fn r_type(i: &str, opcode: u32, funct3: u32, funct7: u32) -> ParseResult<Instruction> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs1) = register(i)?;
@@ -513,7 +513,7 @@ fn r_type<'a>(i: &str, opcode: u32, funct3: u32, funct7: u32) -> ParseResult<Ins
 
 // Float ops not implemented yet
 #[allow(dead_code)]
-fn r4_type<'a>(i: &str, opcode: u32, funct3: u32, funct2: u32) -> ParseResult<Instruction> {
+fn r4_type(i: &str, opcode: u32, funct3: u32, funct2: u32) -> ParseResult<Instruction> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs1) = register(i)?;
@@ -535,7 +535,7 @@ fn r4_type<'a>(i: &str, opcode: u32, funct3: u32, funct2: u32) -> ParseResult<In
     ))
 }
 
-fn i_type<'a>(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
+fn i_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs1) = register(i)?;
@@ -553,7 +553,7 @@ fn i_type<'a>(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn s_type<'a>(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
+fn s_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     let (i, rs1) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs2) = register(i)?;
@@ -571,7 +571,7 @@ fn s_type<'a>(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn b_type<'a>(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
+fn b_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     let (i, rs1) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs2) = register(i)?;
@@ -589,7 +589,7 @@ fn b_type<'a>(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn u_type<'a>(i: &str, opcode: u32) -> ParseResult<Instruction> {
+fn u_type(i: &str, opcode: u32) -> ParseResult<Instruction> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, imm) = immediate(i)?;
@@ -603,7 +603,7 @@ fn u_type<'a>(i: &str, opcode: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn j_type<'a>(i: &str, opcode: u32) -> ParseResult<Instruction> {
+fn j_type(i: &str, opcode: u32) -> ParseResult<Instruction> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, imm) = immediate(i)?;
@@ -627,7 +627,7 @@ fn translate_op<'a>(
     Ok((i, f(rd, rs)))
 }
 
-fn srai_op<'a>(i: &str, opcode: u32) -> ParseResult<Instruction> {
+fn srai_op(i: &str, opcode: u32) -> ParseResult<Instruction> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs1) = register(i)?;
@@ -656,7 +656,7 @@ fn program(i: &str) -> ParseResult<Program<'_>> {
         let loc = instructions
             .len()
             .checked_shl(2)
-            .ok_or_else(|| format!("Too many instructions."))?;
+            .ok_or_else(|| "Too many instructions.".to_string())?;
         let line = line.trim();
         let mut split = line.rsplitn(2, ':');
         let inst = split.next().unwrap();
@@ -666,11 +666,11 @@ fn program(i: &str) -> ParseResult<Program<'_>> {
             if i.len() > 1 {
                 return Err(format!("Unexpected characters \"{}\" on line {}.", i, row));
             }
-            if let Some(_) = labels.insert(l, loc) {
+            if labels.insert(l, loc).is_some() {
                 return Err(format!("Duplicate label {} on line {}.", l, row));
             }
         }
-        if inst.len() > 0 {
+        if !inst.is_empty() {
             let (i, inst) = instruction(inst)?;
             if i.len() > 1 {
                 return Err(format!("Unexpected characters \"{}\" on line {}.", i, row));
