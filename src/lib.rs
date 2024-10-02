@@ -1,6 +1,5 @@
 #![warn(missing_docs)]
-#![allow(clippy::inconsistent_digit_grouping, clippy::unreadable_literal)]
-#![feature(exclusive_range_pattern, array_value_iter, or_patterns)]
+#![allow(clippy::unusual_byte_groupings)]
 //! A RISC-V Computer emulator
 
 pub mod assembler;
@@ -11,10 +10,7 @@ use traps::Exception;
 
 /// A RISC-V computer
 ///
-/// Contains a single [Core] and the main [Memory].
-///
-/// [Core]: ./struct.Core.html
-/// [Memory]: ./struct.Memory.html
+/// Contains a single [`Core`] and the main [`Memory`].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Computer {
     /// The emulated processor that the program will run on.
@@ -36,24 +32,20 @@ impl Computer {
         }
     }
 
-    /// Runs the currently loaded program until an [Exception] is hit.
+    /// Runs the currently loaded program until an [`Exception`] is hit.
     ///
     /// This resumes from whatever state the processor is in, so this can be
     /// called repeatedly after appropriately dealing with the exception.
     ///
-    /// This currently ignores any raised [EnvironmentCall].
-    ///
-    /// [Exception]: ./traps/enum.Exception.html
-    /// [EnvironmentCall]: ./traps/enum.Exception.html#variant.EnvironmentCall
+    /// This currently ignores any raised [`Exception::EnvironmentCall`].
     pub fn run(&mut self) -> Exception {
         loop {
             match self.core.step(&mut self.memory) {
                 Ok(()) => continue,
                 Err(Exception::EnvironmentCall) => {
                     self.core.program_counter += 4;
-                    match self.core.registers[10] {
-                        0 => println!("{}", self.core.registers[13]),
-                        _ => {}
+                    if self.core.registers[10] == 0 {
+                        println!("{}", self.core.registers[13]);
                     }
                     continue;
                 }
@@ -68,11 +60,7 @@ impl Computer {
     /// and resets the program counter of the core so that it will be executed
     /// when `run` is next called.
     pub fn load_program(&mut self, program: impl IntoIterator<Item = u32>) {
-        let bytes: Vec<_> = program
-            .into_iter()
-            .map(|i| core::array::IntoIter::new(i.to_le_bytes()))
-            .flatten()
-            .collect();
+        let bytes: Vec<_> = program.into_iter().flat_map(|i| i.to_le_bytes()).collect();
         self.memory.main[..bytes.len()].copy_from_slice(&bytes);
         self.core.program_counter = 0;
     }
@@ -115,7 +103,7 @@ impl Memory {
         } else {
             [0; 8]
         };
-        (&mut bytes[..num_bytes]).copy_from_slice(data);
+        bytes[..num_bytes].copy_from_slice(data);
         Ok(u64::from_le_bytes(bytes))
     }
 
@@ -162,7 +150,7 @@ const fn sext(num: u32, bit: u8) -> u32 {
 /// [RISC-V]: https://riscv.org/specifications/
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Core {
-    /// The integer registers, the 0th register shoul always be 0.
+    /// The integer registers, the 0th register should always be 0.
     pub registers: [u64; 32],
     /// The float registers, none of these carry any special meaning.
     pub float_registers: [u64; 32],
@@ -180,10 +168,8 @@ impl Core {
 
     /// Execute a single clock cycle.
     ///
-    /// This returns an error if any [Exception]s occur, although these do not
+    /// This returns an error if an [`Exception`] occurs, although these do not
     /// always indicate an actual error has occurred.
-    ///
-    /// [Exception]: ./traps/enum.Exception.html
     pub fn step(&mut self, mem: &mut Memory) -> Result<(), Exception> {
         // It makes no difference doing this at the start or end as long as it
         // is consistent.
@@ -447,15 +433,10 @@ struct MemoryStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::array;
 
     // TODO: Remove this and use Computer
     fn from_instructions(instructions: &[u32]) -> (Core, Memory) {
-        let bytes: Vec<_> = instructions
-            .iter()
-            .map(|i| array::IntoIter::new(i.to_le_bytes()))
-            .flatten()
-            .collect();
+        let bytes: Vec<_> = instructions.iter().flat_map(|i| i.to_le_bytes()).collect();
         (Core::new(), Memory::new(bytes.into_boxed_slice()))
     }
 

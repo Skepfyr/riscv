@@ -1,9 +1,7 @@
 //! A RISC-V assembler
 //!
-//! The main entrypoint to this module is the [assemble] function that takes a
+//! The main entrypoint to this module is the [`assemble`] function that takes
 //! the input RISC-V assembler code and produces the program as machine code.
-//!
-//! [assemble]: ./fn.assemble.html
 
 use crate::bits;
 use std::{
@@ -21,11 +19,11 @@ pub fn assemble(input: &str) -> Result<Vec<u32>, String> {
             labels,
         },
     ) = program(input)?;
-    Ok(instructions
+    instructions
         .into_iter()
         .enumerate()
         .map(|(loc, i)| i.to_machine_code(loc * 4, &labels))
-        .collect::<Result<_, _>>()?)
+        .collect::<Result<_, _>>()
 }
 
 type ParseResult<'a, T> = Result<(&'a str, T), String>;
@@ -93,8 +91,8 @@ enum Instruction<'a> {
 }
 
 impl<'a> Instruction<'a> {
-    fn to_machine_code(&self, loc: usize, labels: &HashMap<&'a str, usize>) -> Result<u32, String> {
-        Ok(match *self {
+    fn to_machine_code(self, loc: usize, labels: &HashMap<&'a str, usize>) -> Result<u32, String> {
+        Ok(match self {
             Instruction::RType {
                 opcode,
                 funct3,
@@ -197,7 +195,7 @@ impl<'a> Instruction<'a> {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct I12(i32);
-impl<'a> TryFrom<i32> for I12 {
+impl TryFrom<i32> for I12 {
     type Error = String;
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         let max = 1 << (12 - 1);
@@ -208,14 +206,14 @@ impl<'a> TryFrom<i32> for I12 {
         }
     }
 }
-impl Into<i32> for I12 {
-    fn into(self) -> i32 {
-        self.0
+impl From<I12> for i32 {
+    fn from(val: I12) -> Self {
+        val.0
     }
 }
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct I13_2(i32);
-impl<'a> TryFrom<i32> for I13_2 {
+impl TryFrom<i32> for I13_2 {
     type Error = String;
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         let max = 1 << (13 - 1);
@@ -226,14 +224,14 @@ impl<'a> TryFrom<i32> for I13_2 {
         }
     }
 }
-impl Into<i32> for I13_2 {
-    fn into(self) -> i32 {
-        self.0
+impl From<I13_2> for i32 {
+    fn from(val: I13_2) -> Self {
+        val.0
     }
 }
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct I20(i32);
-impl<'a> TryFrom<i32> for I20 {
+impl TryFrom<i32> for I20 {
     type Error = String;
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         let max = 1 << (20 - 1);
@@ -244,9 +242,9 @@ impl<'a> TryFrom<i32> for I20 {
         }
     }
 }
-impl Into<i32> for I20 {
-    fn into(self) -> i32 {
-        self.0
+impl From<I20> for i32 {
+    fn from(val: I20) -> Self {
+        val.0
     }
 }
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -262,9 +260,9 @@ impl TryFrom<i32> for I21_2 {
         }
     }
 }
-impl Into<i32> for I21_2 {
-    fn into(self) -> i32 {
-        self.0
+impl From<I21_2> for i32 {
+    fn from(value: I21_2) -> Self {
+        value.0
     }
 }
 
@@ -278,7 +276,7 @@ enum Immediate<'a, T> {
 }
 
 impl<T: Into<i32> + Copy> Immediate<'_, T> {
-    fn to_offset(&self, loc: usize, labels: &HashMap<&str, usize>) -> Result<i32, String> {
+    fn to_offset(self, loc: usize, labels: &HashMap<&str, usize>) -> Result<i32, String> {
         Ok(match self {
             Immediate::Label(l) => {
                 let dest = *labels.get(l).ok_or(format!("Label {} not defined.", l))?;
@@ -291,7 +289,7 @@ impl<T: Into<i32> + Copy> Immediate<'_, T> {
                 }
                 .map_err(|_| format!("Distance to {} too large", l))?
             }
-            Immediate::Immediate(value) => (*value).into(),
+            Immediate::Immediate(value) => value.into(),
         })
     }
 }
@@ -304,10 +302,10 @@ fn arg_sep(c: char) -> bool {
     c == ',' || is_space(c)
 }
 
-fn signed_int(i: &str) -> ParseResult<i32> {
+fn signed_int(i: &str) -> ParseResult<'_, i32> {
     let loc = i
         .find(|c: char| !c.is_ascii_digit() && c != '+' && c != '-')
-        .unwrap_or_else(|| i.len());
+        .unwrap_or(i.len());
     let (num, i) = i.split_at(loc);
     let num = num
         .parse()
@@ -315,10 +313,8 @@ fn signed_int(i: &str) -> ParseResult<i32> {
     Ok((i, num))
 }
 
-fn label(i: &str) -> ParseResult<&str> {
-    let loc = i
-        .find(|c: char| !c.is_ascii_uppercase())
-        .unwrap_or_else(|| i.len());
+fn label(i: &str) -> ParseResult<'_, &str> {
+    let loc = i.find(|c: char| !c.is_ascii_uppercase()).unwrap_or(i.len());
     if loc == 0 {
         return Err(format!("\"{}\" is not a valid label.", i));
     }
@@ -333,10 +329,8 @@ fn in_range(digits: &[u8], range: Range<u32>) -> Result<u32, String> {
     }
 }
 
-fn register(i: &str) -> ParseResult<Register> {
-    let non_alpha = i
-        .find(|c: char| !c.is_alphanumeric())
-        .unwrap_or_else(|| i.len());
+fn register(i: &str) -> ParseResult<'_, Register> {
+    let non_alpha = i.find(|c: char| !c.is_alphanumeric()).unwrap_or(i.len());
     let (reg, i) = i.split_at(non_alpha);
     let reg = match reg.as_bytes() {
         b"zero" => 0,
@@ -347,24 +341,24 @@ fn register(i: &str) -> ParseResult<Register> {
         b"fp" => 8,
         [b'x', digits @ ..] => in_range(digits, 0..32)?,
         [b't', digits @ ..] => in_range(digits, 0..7).map(|i| match i {
-            0..3 => i + 5,
-            3..7 => i + 25,
+            0..=2 => i + 5,
+            3..=6 => i + 25,
             _ => unreachable!(),
         })?,
         [b's', digits @ ..] => in_range(digits, 0..12).map(|i| match i {
-            0..2 => i + 8,
-            2..12 => i + 16,
+            0..=1 => i + 8,
+            2..=11 => i + 16,
             _ => unreachable!(),
         })?,
         [b'a', digits @ ..] => in_range(digits, 0..8).map(|i| i + 10)?,
         [b'f', b't', digits @ ..] => in_range(digits, 0..12).map(|i| match i {
-            0..8 => i,
-            8..12 => i + 20,
+            0..=7 => i,
+            8..=11 => i + 20,
             _ => unreachable!(),
         })?,
         [b'f', b's', digits @ ..] => in_range(digits, 0..12).map(|i| match i {
-            0..2 => i + 8,
-            2..12 => i + 16,
+            0..=1 => i + 8,
+            2..=11 => i + 16,
             _ => unreachable!(),
         })?,
         [b'f', b'a', digits @ ..] => in_range(digits, 0..8).map(|i| i + 10)?,
@@ -379,7 +373,7 @@ fn register(i: &str) -> ParseResult<Register> {
     Ok((i, Register(reg)))
 }
 
-fn immediate<T: TryFrom<i32, Error = String>>(i: &str) -> ParseResult<Immediate<'_, T>> {
+fn immediate<T: TryFrom<i32, Error = String>>(i: &str) -> ParseResult<'_, Immediate<'_, T>> {
     if let Ok((i, label)) = label(i) {
         return Ok((i, Immediate::Label(label)));
     }
@@ -388,12 +382,12 @@ fn immediate<T: TryFrom<i32, Error = String>>(i: &str) -> ParseResult<Immediate<
     Ok((i, imm))
 }
 
-fn instruction(i: &str) -> ParseResult<Instruction> {
-    let loc = i.find(is_space).unwrap_or_else(|| i.len());
+fn instruction(i: &str) -> ParseResult<'_, Instruction<'_>> {
+    let loc = i.find(is_space).unwrap_or(i.len());
     let (op, i) = i.split_at(loc);
     let i = i.trim_start_matches(is_space);
     Ok(match op {
-        // pseudoinstructions
+        // pseudo-instructions
         "nop" => (
             i,
             Instruction::Raw {
@@ -492,7 +486,7 @@ fn instruction(i: &str) -> ParseResult<Instruction> {
     })
 }
 
-fn r_type(i: &str, opcode: u32, funct3: u32, funct7: u32) -> ParseResult<Instruction> {
+fn r_type(i: &str, opcode: u32, funct3: u32, funct7: u32) -> ParseResult<'_, Instruction<'_>> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs1) = register(i)?;
@@ -513,7 +507,7 @@ fn r_type(i: &str, opcode: u32, funct3: u32, funct7: u32) -> ParseResult<Instruc
 
 // Float ops not implemented yet
 #[allow(dead_code)]
-fn r4_type(i: &str, opcode: u32, funct3: u32, funct2: u32) -> ParseResult<Instruction> {
+fn r4_type(i: &str, opcode: u32, funct3: u32, funct2: u32) -> ParseResult<'_, Instruction<'_>> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs1) = register(i)?;
@@ -535,7 +529,7 @@ fn r4_type(i: &str, opcode: u32, funct3: u32, funct2: u32) -> ParseResult<Instru
     ))
 }
 
-fn i_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
+fn i_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<'_, Instruction<'_>> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs1) = register(i)?;
@@ -553,7 +547,7 @@ fn i_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn s_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
+fn s_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<'_, Instruction<'_>> {
     let (i, rs1) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs2) = register(i)?;
@@ -571,7 +565,7 @@ fn s_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn b_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
+fn b_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<'_, Instruction<'_>> {
     let (i, rs1) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs2) = register(i)?;
@@ -589,7 +583,7 @@ fn b_type(i: &str, opcode: u32, funct3: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn u_type(i: &str, opcode: u32) -> ParseResult<Instruction> {
+fn u_type(i: &str, opcode: u32) -> ParseResult<'_, Instruction<'_>> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, imm) = immediate(i)?;
@@ -603,7 +597,7 @@ fn u_type(i: &str, opcode: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn j_type(i: &str, opcode: u32) -> ParseResult<Instruction> {
+fn j_type(i: &str, opcode: u32) -> ParseResult<'_, Instruction<'_>> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, imm) = immediate(i)?;
@@ -617,24 +611,22 @@ fn j_type(i: &str, opcode: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn translate_op<'a>(
-    i: &'a str,
+fn translate_op(
+    i: &str,
     f: fn(rd: Register, rs: Register) -> Instruction<'static>,
-) -> ParseResult<'a, Instruction<'a>> {
+) -> ParseResult<'_, Instruction<'_>> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs) = register(i)?;
     Ok((i, f(rd, rs)))
 }
 
-fn srai_op(i: &str, opcode: u32) -> ParseResult<Instruction> {
+fn srai_op(i: &str, opcode: u32) -> ParseResult<'_, Instruction<'_>> {
     let (i, rd) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
     let (i, rs1) = register(i)?;
     let i = i.trim_start_matches(arg_sep);
-    let loc = i
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or_else(|| i.len());
+    let loc = i.find(|c: char| !c.is_ascii_digit()).unwrap_or(i.len());
     let (digits, i) = i.split_at(loc);
     let imm = in_range(digits.as_bytes(), 0..64)? as i32;
     Ok((
@@ -649,7 +641,7 @@ fn srai_op(i: &str, opcode: u32) -> ParseResult<Instruction> {
     ))
 }
 
-fn program(i: &str) -> ParseResult<Program<'_>> {
+fn program(i: &str) -> ParseResult<'_, Program<'_>> {
     let mut instructions = Vec::new();
     let mut labels = HashMap::new();
     for (row, line) in i.lines().enumerate() {

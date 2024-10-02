@@ -7,5 +7,6 @@ fn main() {
     let program = assemble(&assembler).unwrap();
     let mut computer = Computer::new(args[2].parse().unwrap());
     computer.load_program(program);
-    println!("{:?}", computer.run())
+    println!("{:?}", computer.run());
+    print!("{}", computer.core.cycle_count);
 }

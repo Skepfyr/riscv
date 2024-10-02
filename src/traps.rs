@@ -1,9 +1,7 @@
 //! Traps - Exceptions and Interrupts
 //!
 //! This module holds the types for all exceptions and interrupts that can be
-//! raised by a running [Core].
-//!
-//! [Core]: ../struct.Core.html
+//! raised by a running [`Core`][super::Core].
 
 /// An enumeration of all the exceptions that could occur
 ///

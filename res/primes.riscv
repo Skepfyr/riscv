@@ -1,4 +1,6 @@
 li x1, 2
+mv a3, x1
+ecall
 li s0, 1000
 li s1, 32
 LOOP:
@@ -6,7 +8,7 @@ slli x2, x1, 1
 INNER:
 sb x2, s1, 100
 add x2, x2, x1
-blt x2, s0, INNER
+bge s0, x2, INNER
 OUT:
 addi x1, x1, 1
 lb x2, x1, 100
