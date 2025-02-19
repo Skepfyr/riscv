@@ -25,10 +25,9 @@ impl Computer {
     /// All the memory is initialised to zero.
     /// This panics if too much memory is requested.
     pub fn new(memory_size: u64) -> Self {
-        let main_mem = vec![0; memory_size.try_into().unwrap()];
         Self {
             core: Core::new(),
-            memory: Memory::new(main_mem.into_boxed_slice()),
+            memory: Memory::new(memory_size),
         }
     }
 
@@ -38,33 +37,30 @@ impl Computer {
     /// called repeatedly after appropriately dealing with the exception.
     ///
     /// This currently ignores any raised [`Exception::EnvironmentCall`].
-    pub fn run(&mut self) -> Exception {
+    pub fn run(&mut self) -> Result<(), Exception> {
         loop {
             match self.core.step(&mut self.memory) {
-                Ok(()) => continue,
-                Err(Exception::EnvironmentCall) => {
+                Ok(()) => {
+                    if self.memory.magic != 0 {
+                        break;
+                    }
+                }
+                Err(Exception::MModeEnvironmentCall) => {
                     self.core.program_counter += 4;
                     if self.core.registers[10] == 0 {
                         println!("{}", self.core.registers[13]);
                     }
                     continue;
                 }
-                Err(e) => return e,
+                Err(e) => return Err(e),
             }
         }
-    }
-
-    /// Load a program into memory and point the program counter at the start.
-    ///
-    /// This copies the provided instructions into the bottom of system memory
-    /// and resets the program counter of the core so that it will be executed
-    /// when `run` is next called.
-    pub fn load_program(&mut self, program: impl IntoIterator<Item = u32>) {
-        let bytes: Vec<_> = program.into_iter().flat_map(|i| i.to_le_bytes()).collect();
-        self.memory.main[..bytes.len()].copy_from_slice(&bytes);
-        self.core.program_counter = 0;
+        Ok(())
     }
 }
+
+/// The address that the processor will start executing from after a reset.
+pub const RESET_VECTOR: u64 = 0x2000;
 
 /// A systems's memory.
 ///
@@ -72,29 +68,61 @@ impl Computer {
 /// (references to) the memory of any attached DMA peripherals.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Memory {
+    /// The ROM memory, holds the initial program and any boot code.
+    pub rom: Box<[u8; 0x4000]>,
+    /// The magic register, used to shutdown the computer.
+    pub magic: u32,
     /// The main system memory, holds both instructions and data.
     pub main: Box<[u8]>,
 }
 
 impl Memory {
+    /// The offset in the address space where main memory starts.
+    pub const RAM_OFFSET: usize = 0x40_00_00_00;
+
     /// Constructs a Memory containing the provided data in main memory.
-    pub fn new(main: Box<[u8]>) -> Self {
-        Self { main }
+    pub fn new(main_memory_size: u64) -> Self {
+        Self {
+            rom: Box::new([0; 0x4000]),
+            magic: 0,
+            main: vec![0; main_memory_size.try_into().unwrap()].into_boxed_slice(),
+        }
     }
 
     fn load(&self, address: u64, width: u8, sign_extend: bool) -> Result<u64, Exception> {
         let num_bytes = 1 << width;
         // If any bits below width aren't set this load isn't correctly aligned.
         if bits(address as u32, 0..width) != 0 {
-            return Err(Exception::AccessFault);
+            return Err(Exception::LoadAddressMisaligned);
         }
         let num_bytes = num_bytes as usize;
-        let address: usize = address.try_into().map_err(|_| Exception::AccessFault)?;
-        // Get a slice of main memory from address to address + 2^width.
-        let data = self
-            .main
-            .get(address..address + num_bytes)
-            .ok_or(Exception::AccessFault)?;
+        let address: usize = address.try_into().map_err(|_| Exception::LoadAccessFault)?;
+        let bytes;
+        let data = match address {
+            0..0x4000 => {
+                // Get a slice of ROM from address to address + 2^width.
+                self.rom
+                    .get(address..address + num_bytes)
+                    .ok_or(Exception::LoadAccessFault)?
+            }
+            0x4000 => {
+                bytes = self.magic.to_le_bytes();
+                bytes.get(..num_bytes).ok_or(Exception::LoadAccessFault)?
+            }
+            0x4001..=0x4004 => {
+                // The magic register has extra alignment requirements.
+                return Err(Exception::LoadAddressMisaligned);
+            }
+            Self::RAM_OFFSET.. => {
+                // Main memory is offset to allow for ROM and peripherals.
+                let address = address - Self::RAM_OFFSET;
+                // Get a slice of main memory from address to address + 2^width.
+                self.main
+                    .get(address..address + num_bytes)
+                    .ok_or(Exception::LoadAccessFault)?
+            }
+            _ => return Err(Exception::LoadAccessFault),
+        };
         // Sign extend by copying into an array of all ones, but only do it if
         // sign extending has been requested and the top bit of the loaded data
         // is set.
@@ -111,16 +139,40 @@ impl Memory {
         let num_bytes = 1 << width;
         // If any bits below width aren't set this load isn't correctly aligned.
         if bits(address as u32, 0..width) != 0 {
-            return Err(Exception::AccessFault);
+            return Err(Exception::StoreAddressMisaligned);
         }
         let num_bytes = num_bytes as usize;
-        let address: usize = address.try_into().map_err(|_| Exception::AccessFault)?;
-        // Get a slice of main memory from address to address + 2^width.
-        let data = self
-            .main
-            .get_mut(address..address + num_bytes)
-            .ok_or(Exception::AccessFault)?;
-        data.copy_from_slice(&value.to_le_bytes()[0..num_bytes]);
+        let address: usize = address
+            .try_into()
+            .map_err(|_| Exception::StoreAccessFault)?;
+        match address {
+            0x4000 => {
+                // The magic register is only 4 bytes wide.
+                if num_bytes > 4 {
+                    return Err(Exception::StoreAccessFault);
+                }
+                let mut bytes = self.magic.to_le_bytes();
+                bytes[..num_bytes].copy_from_slice(&value.to_le_bytes()[..num_bytes]);
+                self.magic = u32::from_le_bytes(bytes);
+                return Ok(());
+            }
+            0x4001..=0x4004 => {
+                // The magic register has extra alignment requirements.
+                return Err(Exception::StoreAddressMisaligned);
+            }
+            0x40000000.. => {
+                // Main memory is offset by 0x40000000 to allow for ROM and peripherals.
+                let address = address - 0x40000000;
+                // Get a slice of main memory from address to address + 2^width.
+                let data = self
+                    .main
+                    .get_mut(address..address + num_bytes)
+                    .ok_or(Exception::StoreAccessFault)?;
+                data.copy_from_slice(&value.to_le_bytes()[..num_bytes]);
+            }
+            _ => return Err(Exception::StoreAccessFault),
+        }
+
         Ok(())
     }
 }
@@ -148,7 +200,7 @@ const fn sext(num: u32, bit: u8) -> u32 {
 /// clock cycle model.
 ///
 /// [RISC-V]: https://riscv.org/specifications/
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Core {
     /// The integer registers, the 0th register should always be 0.
     pub registers: [u64; 32],
@@ -160,10 +212,26 @@ pub struct Core {
     pub cycle_count: u64,
 }
 
+impl Default for Core {
+    fn default() -> Self {
+        Self {
+            registers: [0; 32],
+            float_registers: [0; 32],
+            program_counter: RESET_VECTOR,
+            cycle_count: 0,
+        }
+    }
+}
+
 impl Core {
     /// Create a new core with all registers set to 0.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Reset the core to its default state.
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 
     /// Execute a single clock cycle.
@@ -180,7 +248,8 @@ impl Core {
         // Update the program counter to point at the next instruction, if we
         // should branch take the ALU's output, otherwise just add 4.
         self.program_counter = if execute.branch {
-            execute.alu_out
+            // All branches have the final bit cleared, should only apply to JALR.
+            execute.alu_out & !1
         } else {
             self.program_counter + 4
         };
@@ -211,7 +280,7 @@ impl Core {
             return Err(if bit(inst, 20) {
                 Exception::Breakpoint
             } else {
-                Exception::EnvironmentCall
+                Exception::MModeEnvironmentCall
             });
         }
         // Work out what kind of instruction we have, decode the immediate, and
@@ -222,7 +291,7 @@ impl Core {
             // U type instruction - LUI or AUIPC
             (_, 0b101) => (bits(inst, 12..32) << 12, 0),
             // S type instruction - Used for store instructions
-            (0b01, 0b000 | 0b001) => (sext(bits(inst, 25..32) << 5 | bits(inst, 7..12), 12), 2),
+            (0b01, 0b000 | 0b001) => (sext((bits(inst, 25..32) << 5) | bits(inst, 7..12), 12), 2),
             // R4 type instruction - Used for floating point instructions
             (0b10, lower) if lower < 4 => (0, 3),
             // R type instruction - Register-Register operations
@@ -230,10 +299,10 @@ impl Core {
             // B type instruction - Used for branch instructions
             (0b11, 0b000) => (
                 sext(
-                    bits(inst, 31..32) << 12
-                        | bits(inst, 7..8) << 11
-                        | bits(inst, 25..31) << 5
-                        | bits(inst, 8..12) << 1,
+                    (bits(inst, 31..32) << 12)
+                        | (bits(inst, 7..8) << 11)
+                        | (bits(inst, 25..31) << 5)
+                        | (bits(inst, 8..12) << 1),
                     13,
                 ),
                 2,
@@ -241,16 +310,22 @@ impl Core {
             // J type instruction - JAL
             (0b11, 0b011) => (
                 sext(
-                    bits(inst, 31..32) << 20
-                        | bits(inst, 12..20) << 12
-                        | bits(inst, 20..21) << 11
-                        | bits(inst, 21..31) << 1,
+                    (bits(inst, 31..32) << 20)
+                        | (bits(inst, 12..20) << 12)
+                        | (bits(inst, 20..21) << 11)
+                        | (bits(inst, 21..31) << 1),
                     21,
                 ),
                 0,
             ),
             // I type instruction - Register-Immediate operations
-            (0b00 | 0b11, _) => (sext(bits(inst, 20..32), 12), 1),
+            (0b00 | 0b11, _) => {
+                // If it's a 32-bit shift then it mustn't shift too far.
+                if bits(inst, 2..7) == 0b00110 && bits(inst, 12..14) == 0b01 && bit(inst, 25) {
+                    return Err(Exception::IllegalInstruction);
+                }
+                (sext(bits(inst, 20..32), 12), 1)
+            }
         };
         // Utilise the fact that register 0 is always 0.
         let rs1 = if num_sources >= 1 {
@@ -282,7 +357,7 @@ impl Core {
         let inst = decode.instruction;
         let op_upper = bits(inst, 5..7);
         let op_lower = bits(inst, 2..5);
-        // Use the program counter fas the base for BRANCH, JAL and AUIPC
+        // Use the program counter as the base for BRANCH, JAL and AUIPC
         let source1_value = if op_upper == 0b11 && (op_lower == 0b000 || op_lower == 0b011)
             || op_upper == 0b00 && op_lower == 0b101
         {
@@ -307,22 +382,32 @@ impl Core {
             // Add if it's not an arithmetic operation.
             0
         };
-        // Run alternate versions of the operations in very specific cases.
-        let alu_sel = bit(inst, 30) && (opcode == 0b01100 || opcode == 0b00100 && alu_op == 0b101);
-        let alu_out = match alu_op {
+        let mut alu_out = match alu_op {
             0b000 => {
-                if alu_sel {
+                if bit(inst, 30) && (opcode == 0b01100 || opcode == 0b01110) {
                     source1_value.wrapping_sub(source2_value)
                 } else {
                     source1_value.wrapping_add(source2_value)
                 }
             }
-            0b001 => source1_value.wrapping_shl(source2_value as u32),
+            0b001 => {
+                let shift_mask = if op_lower == 0b110 { 0b11111 } else { 0b111111 };
+                let shift = (source2_value & shift_mask) as u32;
+                source1_value.wrapping_shl(shift)
+            }
             0b101 => {
-                if alu_sel {
-                    (source1_value as i64).wrapping_shr(source2_value as u32) as u64
-                } else {
-                    source1_value.wrapping_shr(source2_value as u32)
+                // (32bit OP, is_arithmetic)
+                match (op_lower == 0b110, bit(inst, 30)) {
+                    (false, false) => source1_value.wrapping_shr(source2_value as u32),
+                    (false, true) => {
+                        (source1_value as i64).wrapping_shr(source2_value as u32) as u64
+                    }
+                    (true, false) => {
+                        (source1_value as i32 as u32).wrapping_shr(source2_value as u32) as u64
+                    }
+                    (true, true) => {
+                        (source1_value as i32).wrapping_shr(source2_value as u32) as u64
+                    }
                 }
             }
             0b010 => {
@@ -345,6 +430,10 @@ impl Core {
             // We know alu_op is three bits
             8..=u8::MAX => unreachable!(),
         };
+        // Sign extend the results to 32 bits for the special 32-bit instructions.
+        if op_lower == 0b110 {
+            alu_out = alu_out as i32 as i64 as u64;
+        }
 
         // Work out whether we should be branching.
         let (not, unsigned, less) = (bit(inst, 12), bit(inst, 13), bit(inst, 14));
@@ -436,8 +525,13 @@ mod tests {
 
     // TODO: Remove this and use Computer
     fn from_instructions(instructions: &[u32]) -> (Core, Memory) {
-        let bytes: Vec<_> = instructions.iter().flat_map(|i| i.to_le_bytes()).collect();
-        (Core::new(), Memory::new(bytes.into_boxed_slice()))
+        let size = instructions.len() * 4;
+        let mut memory = Memory::new(size as u64);
+        let mut bytes = instructions.iter().flat_map(|i| i.to_le_bytes());
+        memory.main[..size].fill_with(|| bytes.next().unwrap());
+        let mut core = Core::new();
+        core.program_counter = 0x40000000;
+        (core, memory)
     }
 
     #[test]
@@ -460,28 +554,66 @@ mod tests {
     }
 
     #[test]
-    fn srai() {
-        let instructions = vec![0b010000_110110_00001_101_00011_0010011];
+    fn addiw() {
+        let instructions = vec![0b010010100001_00010_000_00011_0011011];
         let (mut core, mut mem) = from_instructions(&instructions);
-        core.registers[1] = (-2i64 << 0b110110) as u64;
+        core.registers[2] = 0x5e51163ec4e02f46;
         core.step(&mut mem).unwrap();
-        assert_eq!(core.registers[3], -2i64 as u64);
+        assert_eq!(core.registers[3], 0xffffffffc4e033e7);
     }
 
     #[test]
-    #[should_panic] // TODO: This needs fixing, but at the moment this shouldn't work
-    fn sraiw() {
-        let instructions = vec![0b0100001_10110_00001_101_00011_0010011];
+    fn sub() {
+        let instructions = vec![0b0100000_00010_00001_000_00011_0110011];
         let (mut core, mut mem) = from_instructions(&instructions);
-        core.registers[1] = (-2i64 << 0b010110) as u64;
+        core.registers[1] = 0x8000;
+        core.registers[2] = (-0x11i64) as u64;
         core.step(&mut mem).unwrap();
-        assert_eq!(core.registers[3], -2i64 as u64);
+        assert_eq!(core.registers[3], 0x8011);
+    }
+
+    #[test]
+    fn subw() {
+        let instructions = vec![0b0100000_00010_00001_000_00011_0111011];
+        let (mut core, mut mem) = from_instructions(&instructions);
+        core.registers[1] = 0x8000;
+        core.registers[2] = (-0x11i64) as u64;
+        core.step(&mut mem).unwrap();
+        assert_eq!(core.registers[3], 0x8011);
+    }
+
+    #[test]
+    fn srai() {
+        let instructions = vec![0b010000_100000_00001_101_00011_0010011];
+        let (mut core, mut mem) = from_instructions(&instructions);
+        core.registers[1] = 0x8000000000000000;
+        core.step(&mut mem).unwrap();
+        assert_eq!(core.registers[3], 0xffffffff80000000);
+    }
+
+    #[test]
+    fn sraiw() {
+        let instructions = vec![0b010000_0_00110_00001_101_00011_0011011];
+        let (mut core, mut mem) = from_instructions(&instructions);
+        core.registers[1] = 0x5e51163ec4e02f46;
+        core.step(&mut mem).unwrap();
+        assert_eq!(core.registers[3], 0xffffffffff1380bd);
+    }
+
+    #[test]
+    fn sllw() {
+        let instructions = vec![0b000000_0_00001_00001_001_00011_0111011];
+        let (mut core, mut mem) = from_instructions(&instructions);
+        core.registers[1] = 0xffff7fffffffffff;
+        core.step(&mut mem).unwrap();
+        assert_eq!(core.registers[3], 0xffffffff80000000);
     }
 
     #[test]
     fn lh() {
         let instructions = vec![0b111111111101_00001_001_00010_0000011];
         let (mut core, mut mem) = from_instructions(&instructions);
+        mem.rom[2..4].copy_from_slice(&(-48i16).to_le_bytes());
         core.registers[1] = 5;
         core.step(&mut mem).unwrap();
         assert_eq!(core.registers[2], -48i64 as u64);
@@ -491,16 +623,17 @@ mod tests {
     fn lbu() {
         let instructions = vec![0b111111111101_00001_100_00010_0000011];
         let (mut core, mut mem) = from_instructions(&instructions);
+        mem.rom[1] = 0xfc;
         core.registers[1] = 4;
         core.step(&mut mem).unwrap();
-        assert_eq!(core.registers[2], 0b11000001u64);
+        assert_eq!(core.registers[2], 0xfcu64);
     }
 
     #[test]
     fn sb() {
         let instructions = vec![0b1111111_00101_00001_000_00010_0100011];
         let (mut core, mut mem) = from_instructions(&instructions);
-        core.registers[1] = 33;
+        core.registers[1] = 0x40000021;
         core.registers[5] = 42 + (5 << 8);
         core.step(&mut mem).unwrap();
         assert_eq!(mem.main[3], 42);
@@ -510,7 +643,7 @@ mod tests {
     fn sd() {
         let instructions = vec![0b1111111_00101_00001_011_00010_0100011, 0];
         let (mut core, mut mem) = from_instructions(&instructions);
-        core.registers[1] = 30;
+        core.registers[1] = 0x4000001E;
         core.registers[5] = -42i64 as u64;
         core.step(&mut mem).unwrap();
         assert_eq!(&mem.main[0..8], (-42i64).to_le_bytes());
@@ -524,7 +657,7 @@ mod tests {
             0b1111111_00000_00001_101_11101_1100011,
         ];
         let (mut core, mut mem) = from_instructions(&instructions);
-        while core.program_counter < 12 {
+        while core.program_counter < 0x40000000 + 12 {
             core.step(&mut mem).unwrap();
         }
         assert_eq!(core.cycle_count, 23);
@@ -535,8 +668,8 @@ mod tests {
         let instructions = vec![0b00000000011000000000_00001_1101111];
         let (mut core, mut mem) = from_instructions(&instructions);
         core.step(&mut mem).unwrap();
-        assert_eq!(core.registers[1], 4);
-        assert_eq!(core.program_counter, 6);
+        assert_eq!(core.registers[1], 0x40000000 + 4);
+        assert_eq!(core.program_counter, 0x40000000 + 6);
     }
 
     #[test]
@@ -545,7 +678,7 @@ mod tests {
         let (mut core, mut mem) = from_instructions(&instructions);
         core.registers[2] = 5;
         core.step(&mut mem).unwrap();
-        assert_eq!(core.registers[1], 4);
+        assert_eq!(core.registers[1], 0x40000000 + 4);
         assert_eq!(core.program_counter, 12);
     }
 
@@ -566,8 +699,11 @@ mod tests {
         let (mut core, mut mem) = from_instructions(&instructions);
         core.step(&mut mem).unwrap();
         core.step(&mut mem).unwrap();
-        assert_eq!(core.registers[1], 18446744072277893120);
-        assert_eq!(core.registers[2], 1431654404);
+        assert_eq!(
+            core.registers[1],
+            (0xffffffff << 32) + 0b11101010101010101010_000000000000
+        );
+        assert_eq!(core.registers[2], 0b10010101010101010101_000000000100);
     }
 
     #[test]
@@ -576,8 +712,8 @@ mod tests {
         let (mut core, mut mem) = from_instructions(&instructions);
         core.step(&mut mem).unwrap();
         let (mut new_core, new_mem) = from_instructions(&instructions);
-        new_core.program_counter = 4;
-        new_core.cycle_count = 1;
+        new_core.program_counter += 4;
+        new_core.cycle_count += 1;
         assert_eq!(core, new_core);
         assert_eq!(mem, new_mem);
     }
@@ -587,7 +723,7 @@ mod tests {
         let instructions = vec![0b000000000000_00000_000_00000_1110011];
         let (mut core, mut mem) = from_instructions(&instructions);
         let res = core.step(&mut mem);
-        assert_eq!(res, Err(Exception::EnvironmentCall));
+        assert_eq!(res, Err(Exception::MModeEnvironmentCall));
     }
 
     #[test]

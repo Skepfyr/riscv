@@ -3,6 +3,8 @@
 //! The main entrypoint to this module is the [`assemble`] function that takes
 //! the input RISC-V assembler code and produces the program as machine code.
 
+use itertools::Itertools;
+
 use crate::bits;
 use std::{
     collections::HashMap,
@@ -11,7 +13,7 @@ use std::{
 };
 
 /// Assembles the input into machine code.
-pub fn assemble(input: &str) -> Result<Vec<u32>, String> {
+pub fn assemble(input: &str) -> Result<Vec<u8>, String> {
     let (
         _,
         Program {
@@ -22,7 +24,8 @@ pub fn assemble(input: &str) -> Result<Vec<u32>, String> {
     instructions
         .into_iter()
         .enumerate()
-        .map(|(loc, i)| i.to_machine_code(loc * 4, &labels))
+        .map(|(loc, i)| i.to_machine_code(loc * 4, &labels).map(|i| i.to_le_bytes()))
+        .flatten_ok()
         .collect::<Result<_, _>>()
 }
 
@@ -101,11 +104,11 @@ impl<'a> Instruction<'a> {
                 source1,
                 source2,
             } => {
-                funct7 << 25
-                    | source2.0 << 20
-                    | source1.0 << 15
-                    | funct3 << 12
-                    | destination.0 << 7
+                (funct7 << 25)
+                    | (source2.0 << 20)
+                    | (source1.0 << 15)
+                    | (funct3 << 12)
+                    | (destination.0 << 7)
                     | opcode
             }
             Instruction::R4Type {
@@ -117,12 +120,12 @@ impl<'a> Instruction<'a> {
                 source2,
                 source3,
             } => {
-                source3.0 << 27
-                    | funct2 << 25
-                    | source2.0 << 20
-                    | source1.0 << 15
-                    | funct3 << 12
-                    | destination.0 << 7
+                (source3.0 << 27)
+                    | (funct2 << 25)
+                    | (source2.0 << 20)
+                    | (source1.0 << 15)
+                    | (funct3 << 12)
+                    | (destination.0 << 7)
                     | opcode
             }
             Instruction::IType {
@@ -132,10 +135,10 @@ impl<'a> Instruction<'a> {
                 source1,
                 immediate,
             } => {
-                (immediate.to_offset(loc, labels)? as u32) << 20
-                    | source1.0 << 15
-                    | funct3 << 12
-                    | destination.0 << 7
+                ((immediate.to_offset(loc, labels)? as u32) << 20)
+                    | (source1.0 << 15)
+                    | (funct3 << 12)
+                    | (destination.0 << 7)
                     | opcode
             }
             Instruction::SType {
@@ -146,11 +149,11 @@ impl<'a> Instruction<'a> {
                 immediate,
             } => {
                 let imm = immediate.to_offset(loc, labels)? as u32;
-                bits(imm, 5..12) << 25
-                    | source2.0 << 20
-                    | source1.0 << 15
-                    | funct3 << 12
-                    | bits(imm, 0..5) << 7
+                (bits(imm, 5..12) << 25)
+                    | (source2.0 << 20)
+                    | (source1.0 << 15)
+                    | (funct3 << 12)
+                    | (bits(imm, 0..5) << 7)
                     | opcode
             }
             Instruction::BType {
@@ -161,31 +164,31 @@ impl<'a> Instruction<'a> {
                 immediate,
             } => {
                 let imm = immediate.to_offset(loc, labels)? as u32;
-                bits(imm, 12..13) << 31
-                    | bits(imm, 5..11) << 25
-                    | source2.0 << 20
-                    | source1.0 << 15
-                    | funct3 << 12
-                    | bits(imm, 1..5) << 8
-                    | bits(imm, 11..12) << 7
+                (bits(imm, 12..13) << 31)
+                    | (bits(imm, 5..11) << 25)
+                    | (source2.0 << 20)
+                    | (source1.0 << 15)
+                    | (funct3 << 12)
+                    | (bits(imm, 1..5) << 8)
+                    | (bits(imm, 11..12) << 7)
                     | opcode
             }
             Instruction::UType {
                 opcode,
                 destination,
                 immediate,
-            } => (immediate.to_offset(loc, labels)? as u32) << 12 | destination.0 << 7 | opcode,
+            } => ((immediate.to_offset(loc, labels)? as u32) << 12) | (destination.0 << 7) | opcode,
             Instruction::JType {
                 opcode,
                 destination,
                 immediate,
             } => {
                 let imm = immediate.to_offset(loc, labels)? as u32;
-                bits(imm, 20..21) << 31
-                    | bits(imm, 1..11) << 21
-                    | bits(imm, 11..12) << 20
-                    | bits(imm, 12..20) << 12
-                    | destination.0 << 7
+                (bits(imm, 20..21) << 31)
+                    | (bits(imm, 1..11) << 21)
+                    | (bits(imm, 11..12) << 20)
+                    | (bits(imm, 12..20) << 12)
+                    | (destination.0 << 7)
                     | opcode
             }
             Instruction::Raw { instruction } => instruction,
@@ -198,7 +201,7 @@ struct I12(i32);
 impl TryFrom<i32> for I12 {
     type Error = String;
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        let max = 1 << (12 - 1);
+        let max = (1 << 12) - 1;
         if (-max..max).contains(&value) {
             Ok(I12(value))
         } else {
@@ -216,7 +219,7 @@ struct I13_2(i32);
 impl TryFrom<i32> for I13_2 {
     type Error = String;
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        let max = 1 << (13 - 1);
+        let max = (1 << 13) - 1;
         if (-max..max).contains(&value) {
             Ok(I13_2(value))
         } else {
@@ -234,7 +237,7 @@ struct I20(i32);
 impl TryFrom<i32> for I20 {
     type Error = String;
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        let max = 1 << (20 - 1);
+        let max = (1 << 20) - 1;
         if (-max..max).contains(&value) {
             Ok(I20(value))
         } else {
@@ -252,7 +255,7 @@ struct I21_2(i32);
 impl TryFrom<i32> for I21_2 {
     type Error = String;
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        let max = 1 << (21 - 1);
+        let max = (1 << 21) - 1;
         if (-max..max).contains(&value) {
             Ok(I21_2(value))
         } else {
@@ -303,13 +306,21 @@ fn arg_sep(c: char) -> bool {
 }
 
 fn signed_int(i: &str) -> ParseResult<'_, i32> {
+    let (radix, i) = if i.starts_with("0") {
+        match i.chars().nth(1) {
+            Some('x') => (16, &i[2..]),
+            Some('b') => (2, &i[2..]),
+            _ => (10, i),
+        }
+    } else {
+        (10, i)
+    };
     let loc = i
-        .find(|c: char| !c.is_ascii_digit() && c != '+' && c != '-')
+        .find(|c: char| !c.is_digit(radix) && c != '+' && c != '-')
         .unwrap_or(i.len());
     let (num, i) = i.split_at(loc);
-    let num = num
-        .parse()
-        .map_err(|_| format!("\"{}\" is not a valid number", num))?;
+    let num = i32::from_str_radix(num, radix)
+        .map_err(|_| format!("\"{num}\" is not a valid number for radix {radix}"))?;
     Ok((i, num))
 }
 
@@ -663,9 +674,10 @@ fn program(i: &str) -> ParseResult<'_, Program<'_>> {
             }
         }
         if !inst.is_empty() {
-            let (i, inst) = instruction(inst)?;
+            let (i, inst) =
+                instruction(inst).map_err(|err| format!("{} on line {}.", err, line))?;
             if i.len() > 1 {
-                return Err(format!("Unexpected characters \"{}\" on line {}.", i, row));
+                return Err(format!("Unexpected characters \"{}\" on line {}", i, row));
             }
             instructions.push(inst);
         }
@@ -699,6 +711,9 @@ mod tests {
                 0b000000000001_00001_000_00001_0010011,
                 0b1_1111111110_1_11111111_00000_1101111,
             ]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
         )
     }
 }

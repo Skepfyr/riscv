@@ -1,3 +1,5 @@
+auipc tp, 0
+addi tp, tp, 0x100
 li x1, 2
 mv a3, x1
 ecall
@@ -6,12 +8,14 @@ li s1, 32
 LOOP:
 slli x2, x1, 1
 INNER:
-sb x2, s1, 100
+add x3, tp, x2
+sb x3, s1, 0
 add x2, x2, x1
 bge s0, x2, INNER
 OUT:
 addi x1, x1, 1
-lb x2, x1, 100
+add x3, tp, x1
+lb x2, x3, 0
 blt zero, x2, OUT
 mv a3, x1
 ecall
