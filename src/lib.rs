@@ -439,52 +439,116 @@ impl Core {
 }
 
 fn alu(op: u8, variant: Option<u8>, is_32bit: bool, a: u64, b: u64) -> u64 {
-    let out = match op {
-        0b000 => {
-            if variant.is_some_and(|variant| bit(variant as u32, 5)) {
-                a.wrapping_sub(b)
-            } else {
-                a.wrapping_add(b)
+    let out = if variant.is_some_and(|variant| variant == 0b0000001) {
+        // Multiply!
+        match op {
+            // MUL
+            0b000 => {
+                if is_32bit {
+                    (a as u32 as u64).wrapping_mul(b as u32 as u64)
+                } else {
+                    a.wrapping_mul(b)
+                }
             }
-        }
-        0b001 => {
-            if is_32bit {
-                (a as u32).wrapping_shl(b as u32) as u64
-            } else {
-                a.wrapping_shl(b as u32)
+            // MULH
+            0b001 => (((a as i64 as i128) * (b as i64 as i128)) >> 64) as u64,
+            // MULHSU
+            0b010 => (((a as i64 as i128) * (b as i128)) >> 64) as u64,
+            // MULHU
+            0b011 => (((a as u128) * (b as u128)) >> 64) as u64,
+            // DIV
+            0b100 => {
+                let (a, b) = if is_32bit {
+                    (a as i32 as i64, b as i32 as i64)
+                } else {
+                    (a as i64, b as i64)
+                };
+                if b == 0 {
+                    u64::MAX
+                } else {
+                    a.wrapping_div(b) as u64
+                }
             }
-        }
-        0b101 => {
-            let arithmetic = match variant {
-                Some(variant) => bit(variant as u32, 5),
-                None => bit(b as u32, 10),
-            };
-            match (is_32bit, arithmetic) {
-                (false, false) => a.wrapping_shr(b as u32),
-                (false, true) => (a as i64).wrapping_shr(b as u32) as u64,
-                (true, false) => (a as i32 as u32).wrapping_shr(b as u32) as u64,
-                (true, true) => (a as i32).wrapping_shr(b as u32) as u64,
+            // DIVU
+            0b101 => {
+                if is_32bit {
+                    (a as u32).checked_div(b as u32).unwrap_or(u32::MAX) as u64
+                } else {
+                    a.checked_div(b).unwrap_or(u64::MAX)
+                }
             }
-        }
-        0b010 => {
-            if (a as i64) < (b as i64) {
-                1
-            } else {
-                0
+            // REM
+            0b110 => {
+                let (a, b) = if is_32bit {
+                    (a as i32 as i64, b as i32 as i64)
+                } else {
+                    (a as i64, b as i64)
+                };
+                if b == 0 {
+                    a as u64
+                } else {
+                    a.wrapping_rem(b) as u64
+                }
             }
-        }
-        0b011 => {
-            if a < b {
-                1
-            } else {
-                0
+            // REMU
+            0b111 => {
+                if is_32bit {
+                    (a as u32).checked_rem(b as u32).unwrap_or(a as u32) as u64
+                } else {
+                    a.checked_rem(b).unwrap_or(a)
+                }
             }
+            // We know op is three bits
+            8..=u8::MAX => unreachable!(),
         }
-        0b100 => a ^ b,
-        0b110 => a | b,
-        0b111 => a & b,
-        // We know alu_op is three bits
-        8..=u8::MAX => unreachable!(),
+    } else {
+        match op {
+            0b000 => {
+                if variant.is_some_and(|variant| bit(variant as u32, 5)) {
+                    a.wrapping_sub(b)
+                } else {
+                    a.wrapping_add(b)
+                }
+            }
+            0b001 => {
+                if is_32bit {
+                    (a as u32).wrapping_shl(b as u32) as u64
+                } else {
+                    a.wrapping_shl(b as u32)
+                }
+            }
+            0b101 => {
+                let arithmetic = match variant {
+                    Some(variant) => bit(variant as u32, 5),
+                    None => bit(b as u32, 10),
+                };
+                match (is_32bit, arithmetic) {
+                    (false, false) => a.wrapping_shr(b as u32),
+                    (false, true) => (a as i64).wrapping_shr(b as u32) as u64,
+                    (true, false) => (a as i32 as u32).wrapping_shr(b as u32) as u64,
+                    (true, true) => (a as i32).wrapping_shr(b as u32) as u64,
+                }
+            }
+            0b010 => {
+                if (a as i64) < (b as i64) {
+                    1
+                } else {
+                    0
+                }
+            }
+            0b011 => {
+                if a < b {
+                    1
+                } else {
+                    0
+                }
+            }
+            0b100 => a ^ b,
+            0b110 => a | b,
+            0b111 => a & b,
+            // We know op is three bits
+            8..=u8::MAX => unreachable!(),
+        }
     };
     // Sign extend the results to 32 bits for the special 32-bit instructions.
     if is_32bit {
@@ -996,5 +1060,15 @@ mod tests {
         let (mut core, mem) = from_instructions(&instructions);
         let res = core.step(&mem);
         assert_eq!(res, Err(Exception::Breakpoint));
+    }
+
+    #[test]
+    fn div() {
+        let instructions = vec![0b0000001_00010_00001_100_00011_0110011];
+        let (mut core, mem) = from_instructions(&instructions);
+        core.registers[1] = 0xb504f332_i64 as u64;
+        core.registers[2] = -0xb504f334_i64 as u64;
+        core.step(&mem).unwrap();
+        assert_eq!(core.registers[3], -1_i64 as u64);
     }
 }

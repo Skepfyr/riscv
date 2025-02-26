@@ -1,6 +1,6 @@
 hart_ids: [0]
 hart0:
-  ISA: RV64IZifencei
+  ISA: RV64IMZifencei
   User_Spec_Version: '2.3'
   Privilege_Spec_Version: '1.11'
   supported_xlen: [64]
