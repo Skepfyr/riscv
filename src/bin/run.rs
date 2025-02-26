@@ -6,7 +6,7 @@ fn main() {
     let assembler = fs::read_to_string(&args[1]).unwrap();
     let program = assemble(&assembler).unwrap();
     let mut computer = Computer::new(args[2].parse().unwrap());
-    computer.memory.main[..program.len()].copy_from_slice(&program);
+    computer.memory.main.get_mut().unwrap()[..program.len()].copy_from_slice(&program);
     let boot_code = assemble(&format!(
         "
         lui t1, 0x{mem_start:x}

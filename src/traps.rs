@@ -53,6 +53,4 @@ pub enum Exception {
     /// Triggered when corrupted or uncorrectable data is accessed explicitly or
     /// implicitly by an instruction.
     HardwareError = 0x13,
-
-    
 }

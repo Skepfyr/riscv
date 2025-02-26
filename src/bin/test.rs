@@ -14,27 +14,27 @@ fn main() {
     let mut computer = Computer::new(0x1_000_000);
     for segment in elf.segments().unwrap().iter() {
         if segment.p_type == elf::abi::PT_LOAD {
-            computer.memory.main[segment.p_paddr as usize - Memory::RAM_OFFSET..]
-                [..segment.p_memsz as usize]
+            computer.memory.main.get_mut().unwrap()
+                [segment.p_paddr as usize - Memory::RAM_OFFSET..][..segment.p_memsz as usize]
                 .copy_from_slice(elf.segment_data(&segment).unwrap());
         }
     }
-    let (syms, strings) = elf.symbol_table().unwrap().unwrap();
-    let entrypoint = syms
+    let (symbols, strings) = elf.symbol_table().unwrap().unwrap();
+    let entrypoint = symbols
         .iter()
         .find(|sym| {
             sym.st_name > 0 && strings.get(sym.st_name as usize).unwrap() == "rvtest_entrypoint"
         })
         .unwrap()
         .st_value;
-    let signature_start = syms
+    let signature_start = symbols
         .iter()
         .find(|sym| {
             sym.st_name > 0 && strings.get(sym.st_name as usize).unwrap() == "begin_signature"
         })
         .unwrap()
         .st_value;
-    let signature_end = syms
+    let signature_end = symbols
         .iter()
         .find(|sym| {
             sym.st_name > 0 && strings.get(sym.st_name as usize).unwrap() == "end_signature"
@@ -70,7 +70,7 @@ fn main() {
     );
     let sig_start = signature_start as usize - 0x40000000;
     let sig_end = signature_end as usize - 0x40000000;
-    for signature in computer.memory.main[sig_start..sig_end].chunks_exact(4) {
+    for signature in computer.memory.main.get_mut().unwrap()[sig_start..sig_end].chunks_exact(4) {
         writeln!(
             sig_file,
             "{:08x}",
